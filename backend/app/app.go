@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 )
 
@@ -44,6 +45,13 @@ func Register(mux *http.ServeMux, deps *Deps) {
 	mux.HandleFunc("GET /api/v1/echo", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"msg":    r.URL.Query().Get("msg"),
+			"source": deps.Greeting,
+		})
+	})
+
+	mux.HandleFunc("GET /api/v1/upper", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"msg":    strings.ToUpper(r.URL.Query().Get("msg")),
 			"source": deps.Greeting,
 		})
 	})
