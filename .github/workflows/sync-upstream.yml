@@ -57,6 +57,10 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          # PAT, not GITHUB_TOKEN: a push made with GITHUB_TOKEN triggers no
+          # workflows, so notify-app would never fire and the chain would stop
+          # here with every job green.
+          token: ${{ secrets.POC_PAT }}
       - run: .github/scripts/sync-ff.sh "${{ needs.plan.outputs.target }}"
 
   apply-with-approval:
@@ -69,6 +73,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          token: ${{ secrets.POC_PAT }}
 
       # An environment that does not exist is auto-created without protection
       # rules, which would gate nothing. Fail loudly instead of pretending.
