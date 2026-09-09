@@ -1,0 +1,46 @@
+name: sync-upstream
+
+# Lives in the public repo so the mirror stays byte-identical to it; the gate
+# below means it only ever runs in the mirror.
+on:
+  repository_dispatch:
+    types: [upstream-push]
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.repository == 'AnoshanJ/echo-core-mirror'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Fast-forward main from upstream
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/AnoshanJ/echo-core.git
+          git fetch --no-tags upstream main
+
+          mine=$(git rev-parse HEAD)
+          theirs=$(git rev-parse upstream/main)
+          base=$(git merge-base HEAD upstream/main)
+
+          if [ "$mine" = "$theirs" ]; then
+            echo "already in sync at $mine"
+          elif [ "$base" = "$theirs" ]; then
+            echo "mirror is ahead of upstream — an undisclosed fix is in flight, nothing to sync"
+          elif [ "$base" = "$mine" ]; then
+            git merge --ff-only upstream/main
+            git push origin main
+            echo "fast-forwarded $mine -> $theirs"
+          else
+            echo "::error::mirror has diverged from upstream (base=$base mine=$mine theirs=$theirs); a human must reconcile"
+            exit 1
+          fi
