@@ -1,0 +1,21 @@
+name: notify-mirror
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  dispatch:
+    if: github.repository == 'AnoshanJ/echo-core'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tell the mirror to sync
+        env:
+          GH_TOKEN: ${{ secrets.POC_PAT }}
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "no POC_PAT here; the mirror's cron reconciler will pick this up within 15 minutes"
+            exit 0
+          fi
+          gh api --method POST repos/AnoshanJ/echo-core-mirror/dispatches \
+            -f event_type=upstream-push
