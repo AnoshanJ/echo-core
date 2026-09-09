@@ -3,108 +3,65 @@ name: sync-upstream
 # Lives in the public repo so the mirror stays byte-identical to it; the gate
 # below means it only ever runs in the mirror.
 #
-# SYNC_MODE (repository variable in the mirror, default auto):
-#   auto     — fast-forward and push as soon as upstream moves
-#   approval — pause for a reviewer on the sync-approval environment, then push
-#   manual   — report only; a human runs this workflow with mode=auto to apply
+# SYNC_AUTO (repository variable in the mirror):
+#   true  — upstream pushes and the cron reconciler sync on their own
+#   false — only a human clicking Run workflow syncs; automatic triggers report
 on:
   repository_dispatch:
     types: [upstream-push]
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
-    inputs:
-      mode:
-        description: "Override SYNC_MODE for this run"
-        type: choice
-        options: ["", "auto", "approval", "manual"]
-        default: ""
 
 permissions:
   contents: write
 
 jobs:
-  plan:
+  sync:
     if: github.repository == 'AnoshanJ/echo-core-mirror'
     runs-on: ubuntu-latest
-    outputs:
-      action: ${{ steps.state.outputs.action }}
-      target: ${{ steps.state.outputs.target }}
-      mode: ${{ steps.mode.outputs.mode }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-
-      - id: mode
-        run: |
-          mode="${{ inputs.mode }}"
-          [ -z "$mode" ] && mode="${{ vars.SYNC_MODE }}"
-          [ -z "$mode" ] && mode="auto"
-          echo "mode=$mode" >> "$GITHUB_OUTPUT"
-          echo "sync mode: $mode"
-
-      - id: state
-        run: .github/scripts/sync-state.sh
-
-  apply:
-    needs: plan
-    if: needs.plan.outputs.action == 'fast-forward' && needs.plan.outputs.mode == 'auto'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-          # PAT, not GITHUB_TOKEN: a push made with GITHUB_TOKEN triggers no
-          # workflows, so notify-app would never fire and the chain would stop
-          # here with every job green.
-          token: ${{ secrets.POC_PAT }}
-      - run: .github/scripts/sync-ff.sh "${{ needs.plan.outputs.target }}"
-
-  apply-with-approval:
-    needs: plan
-    if: needs.plan.outputs.action == 'fast-forward' && needs.plan.outputs.mode == 'approval'
-    runs-on: ubuntu-latest
-    environment: sync-approval
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
+          # PAT, not GITHUB_TOKEN: GITHUB_TOKEN cannot push .github/workflows/**
+          # at all, and its pushes trigger no workflows, so notify-app would
+          # never fire and the chain would stop here with every job green.
           token: ${{ secrets.POC_PAT }}
 
-      # An environment that does not exist is auto-created without protection
-      # rules, which would gate nothing. Fail loudly instead of pretending.
-      - name: Confirm the environment actually gates
+      - name: Fast-forward main from upstream
         env:
-          GH_TOKEN: ${{ secrets.POC_PAT }}
+          SYNC_AUTO: ${{ vars.SYNC_AUTO }}
+          CLICKED: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           set -euo pipefail
-          rules=$(gh api "repos/${{ github.repository }}/environments/sync-approval" \
-                    --jq '[.protection_rules[]?.type] | join(",")' 2>/dev/null || echo "")
-          if [[ "$rules" != *required_reviewers* ]]; then
-            echo "::error::sync-approval has no required_reviewers rule (got: ${rules:-none}); approval mode would not gate anything. Use SYNC_MODE=manual on plans without environment protection."
+          git remote add upstream https://github.com/AnoshanJ/echo-core.git
+          git fetch --no-tags upstream main
+
+          mine=$(git rev-parse HEAD)
+          theirs=$(git rev-parse upstream/main)
+          base=$(git merge-base HEAD upstream/main)
+
+          if [ "$mine" = "$theirs" ]; then
+            echo "already in sync at ${mine:0:12}"
+            exit 0
+          fi
+          if [ "$base" = "$theirs" ]; then
+            echo "mirror is ahead of upstream — an undisclosed fix is in flight, nothing to sync"
+            exit 0
+          fi
+          if [ "$base" != "$mine" ]; then
+            echo "::error::mirror has diverged from upstream (base=${base:0:12} mine=${mine:0:12} theirs=${theirs:0:12}); a human must reconcile"
             exit 1
           fi
-          echo "gated by: $rules"
 
-      - run: .github/scripts/sync-ff.sh "${{ needs.plan.outputs.target }}"
+          if [ "${SYNC_AUTO:-true}" != "true" ] && [ "$CLICKED" != "true" ]; then
+            echo "${theirs:0:12} is ready to sync; SYNC_AUTO is false, so run this workflow to apply it" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
 
-  report-only:
-    needs: plan
-    if: needs.plan.outputs.action == 'fast-forward' && needs.plan.outputs.mode == 'manual'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Explain how to apply
-        run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<'MD'
-          Sync is **pending a decision**. To apply it:
-
-              gh workflow run sync-upstream.yml -R AnoshanJ/echo-core-mirror -f mode=auto
-
-          Nothing has been pushed. The wrapper stays on its current core revision
-          until someone runs the above.
-          MD
-          echo "manual mode: sync pending, nothing pushed"
+          git merge --ff-only upstream/main
+          git push origin main
+          echo "fast-forwarded ${mine:0:12} -> ${theirs:0:12}"
