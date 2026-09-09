@@ -1,0 +1,25 @@
+name: pr-checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: backend/go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l backend)"
+      - name: vet
+        run: cd backend && go vet ./...
+      - name: verify (binary)
+        run: ./verify.sh
+      - name: verify (docker)
+        run: ./verify.sh --docker
