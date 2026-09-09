@@ -27,9 +27,10 @@ type Options struct {
 }
 
 type CoreModule struct {
-	Path    string `json:"path"`
-	Version string `json:"version"`
-	Sum     string `json:"sum,omitempty"`
+	Path       string `json:"path"`
+	Version    string `json:"version"`
+	Sum        string `json:"sum,omitempty"`
+	ReplacedBy string `json:"replaced_by,omitempty"`
 }
 
 func Register(mux *http.ServeMux, deps *Deps) {
@@ -65,9 +66,17 @@ func coreModule() CoreModule {
 		return CoreModule{Path: ModulePath, Version: "unknown"}
 	}
 	for _, dep := range info.Deps {
-		if dep.Path == ModulePath {
-			return CoreModule{Path: dep.Path, Version: dep.Version, Sum: dep.Sum}
+		if dep.Path != ModulePath {
+			continue
 		}
+		m := CoreModule{Path: dep.Path, Version: dep.Version, Sum: dep.Sum}
+		if dep.Replace != nil {
+			m.ReplacedBy = dep.Replace.Path
+			if dep.Replace.Version != "" {
+				m.ReplacedBy += "@" + dep.Replace.Version
+			}
+		}
+		return m
 	}
 	return CoreModule{Path: ModulePath, Version: "(main module)"}
 }
