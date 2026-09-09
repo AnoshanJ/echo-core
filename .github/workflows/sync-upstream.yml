@@ -2,45 +2,88 @@ name: sync-upstream
 
 # Lives in the public repo so the mirror stays byte-identical to it; the gate
 # below means it only ever runs in the mirror.
+#
+# SYNC_MODE (repository variable in the mirror, default auto):
+#   auto     — fast-forward and push as soon as upstream moves
+#   approval — pause for a reviewer on the sync-approval environment, then push
+#   manual   — report only; a human runs this workflow with mode=auto to apply
 on:
   repository_dispatch:
     types: [upstream-push]
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Override SYNC_MODE for this run"
+        type: choice
+        options: ["", "auto", "approval", "manual"]
+        default: ""
 
 permissions:
   contents: write
 
 jobs:
-  sync:
+  plan:
     if: github.repository == 'AnoshanJ/echo-core-mirror'
     runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.state.outputs.action }}
+      target: ${{ steps.state.outputs.target }}
+      mode: ${{ steps.mode.outputs.mode }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Fast-forward main from upstream
+      - id: mode
         run: |
-          set -euo pipefail
-          git remote add upstream https://github.com/AnoshanJ/echo-core.git
-          git fetch --no-tags upstream main
+          mode="${{ inputs.mode }}"
+          [ -z "$mode" ] && mode="${{ vars.SYNC_MODE }}"
+          [ -z "$mode" ] && mode="auto"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "sync mode: $mode"
 
-          mine=$(git rev-parse HEAD)
-          theirs=$(git rev-parse upstream/main)
-          base=$(git merge-base HEAD upstream/main)
+      - id: state
+        run: .github/scripts/sync-state.sh
 
-          if [ "$mine" = "$theirs" ]; then
-            echo "already in sync at $mine"
-          elif [ "$base" = "$theirs" ]; then
-            echo "mirror is ahead of upstream — an undisclosed fix is in flight, nothing to sync"
-          elif [ "$base" = "$mine" ]; then
-            git merge --ff-only upstream/main
-            git push origin main
-            echo "fast-forwarded $mine -> $theirs"
-          else
-            echo "::error::mirror has diverged from upstream (base=$base mine=$mine theirs=$theirs); a human must reconcile"
-            exit 1
-          fi
+  apply:
+    needs: plan
+    if: needs.plan.outputs.action == 'fast-forward' && needs.plan.outputs.mode == 'auto'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - run: .github/scripts/sync-ff.sh "${{ needs.plan.outputs.target }}"
+
+  apply-with-approval:
+    needs: plan
+    if: needs.plan.outputs.action == 'fast-forward' && needs.plan.outputs.mode == 'approval'
+    runs-on: ubuntu-latest
+    environment: sync-approval
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - run: .github/scripts/sync-ff.sh "${{ needs.plan.outputs.target }}"
+
+  report-only:
+    needs: plan
+    if: needs.plan.outputs.action == 'fast-forward' && needs.plan.outputs.mode == 'manual'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain how to apply
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'MD'
+          Sync is **pending a decision**. To apply it:
+
+              gh workflow run sync-upstream.yml -R AnoshanJ/echo-core-mirror -f mode=auto
+
+          Nothing has been pushed. The wrapper stays on its current core revision
+          until someone runs the above.
+          MD
+          echo "manual mode: sync pending, nothing pushed"
