@@ -17,7 +17,7 @@ var (
 
 // Features names the changes compiled into this core build, so which revision
 // is running is visible at runtime rather than inferred from a version string.
-var Features = []string{"public-feat1", "public-feat2", "public-feat3"}
+var Features = []string{"public-feat1", "public-feat2", "public-feat3", "mirror-security-1"}
 
 // Deps is the live core state handed to wrapper-supplied routes.
 type Deps struct {
