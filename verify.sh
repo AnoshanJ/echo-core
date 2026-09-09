@@ -74,6 +74,7 @@ check "ldflags commit is injected"       "${COMMIT}"  "$(field_of "${BASE}/api/v
 check "core is its own main module"      "(main module)" "$(field_of "${BASE}/api/v1/version" "core_module.version")"
 check "echo carries feature markers"      "public-feat1" "$(field_of "${BASE}/api/v1/echo?msg=hello" "features.0")"
 check "public-feat2 marker present"       "public-feat2" "$(field_of "${BASE}/api/v1/echo?msg=hello" "features.1")"
+check "public-feat3 marker present"       "public-feat3" "$(field_of "${BASE}/api/v1/echo?msg=hello" "features.2")"
 check "no wrapper route (/reverse 404)"  "404"        "$(status_of "${BASE}/api/v1/reverse?msg=hello")"
 
 echo
