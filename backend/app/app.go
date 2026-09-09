@@ -15,6 +15,10 @@ var (
 	Commit  = "none"
 )
 
+// Features names the changes compiled into this core build, so which revision
+// is running is visible at runtime rather than inferred from a version string.
+var Features = []string{"public-feat1"}
+
 // Deps is the live core state handed to wrapper-supplied routes.
 type Deps struct {
 	Started  time.Time
@@ -43,8 +47,9 @@ func Register(mux *http.ServeMux, deps *Deps) {
 
 	mux.HandleFunc("GET /api/v1/echo", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"msg":    r.URL.Query().Get("msg"),
-			"source": deps.Greeting,
+			"msg":      r.URL.Query().Get("msg"),
+			"source":   deps.Greeting,
+			"features": Features,
 		})
 	})
 

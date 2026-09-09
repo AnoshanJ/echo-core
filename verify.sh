@@ -49,7 +49,7 @@ field_of() {
 import json, sys
 d = json.load(sys.stdin)
 for k in sys.argv[1].split("."):
-    d = d[k]
+    d = d[int(k)] if isinstance(d, list) else d[k]
 print(d)
 ' "$2"
 }
@@ -72,6 +72,7 @@ check "echo reports source=core"         "core"       "$(field_of "${BASE}/api/v
 check "ldflags version is injected"      "${VERSION}" "$(field_of "${BASE}/api/v1/version" "version")"
 check "ldflags commit is injected"       "${COMMIT}"  "$(field_of "${BASE}/api/v1/version" "commit")"
 check "core is its own main module"      "(main module)" "$(field_of "${BASE}/api/v1/version" "core_module.version")"
+check "echo carries feature markers"      "public-feat1" "$(field_of "${BASE}/api/v1/echo?msg=hello" "features.0")"
 check "no wrapper route (/reverse 404)"  "404"        "$(status_of "${BASE}/api/v1/reverse?msg=hello")"
 
 echo
