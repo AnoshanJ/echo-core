@@ -23,3 +23,22 @@ jobs:
         run: ./verify.sh
       - name: verify (docker)
         run: ./verify.sh --docker
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: typecheck
+        run: cd frontend && pnpm install --frozen-lockfile && pnpm typecheck
+      - name: verify (source)
+        run: PNPM=pnpm ./verify-frontend.sh
+      - name: verify (docker)
+        run: PNPM=pnpm ./verify-frontend.sh --docker

@@ -1,0 +1,59 @@
+name: release-core
+
+# Lives in the public repo so the mirror stays byte-identical; the gate means
+# it only ever runs in the mirror.
+on:
+  push:
+    branches: [main, "security/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    if: github.repository == 'AnoshanJ/echo-core-mirror'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: https://npm.pkg.github.com
+          scope: "@anoshanj"
+      - name: Publish the core UI prerelease
+        working-directory: frontend
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CORE_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          version="0.0.0-dev.g${GITHUB_SHA:0:12}"
+          if npm view "@anoshanj/echo-core-ui@${version}" version >/dev/null 2>&1; then
+            echo "${version} already published" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          pnpm install --frozen-lockfile
+          # Version before build: the version string is baked into the bundle.
+          npm version --no-git-tag-version "$version"
+          pnpm build
+          npm publish --tag dev
+          echo "published ${version}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  notify:
+    needs: publish
+    if: github.repository == 'AnoshanJ/echo-core-mirror' && github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tell the wrapper a new core revision is available
+        env:
+          GH_TOKEN: ${{ secrets.POC_PAT }}
+        run: |
+          set -euo pipefail
+          gh api --method POST repos/AnoshanJ/echo-app/dispatches \
+            -f event_type=core-updated \
+            -F "client_payload[sha]=${{ github.sha }}"
